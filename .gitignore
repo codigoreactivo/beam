@@ -1,5 +1,21 @@
+# Go
 beam
 *.exe
 *.test
 *.out
 /dist/
+/vendor/
+
+# GUI frontend
+gui/frontend/node_modules/
+gui/frontend/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
