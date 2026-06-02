@@ -38,7 +38,7 @@ func Connect(p *config.Project) (Client, error) {
 	case config.ProtocolSFTP:
 		return dialSFTP(p)
 	case config.ProtocolFTP, config.ProtocolFTPS:
-		return nil, fmt.Errorf("protocol %q not yet implemented — coming soon", p.Protocol)
+		return dialFTP(p)
 	default:
 		return nil, fmt.Errorf("unknown protocol %q", p.Protocol)
 	}
