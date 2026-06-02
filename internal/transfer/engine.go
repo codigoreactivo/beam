@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/jesusjhoel/beam/internal/config"
+	"github.com/codigoreactivo/beam/internal/config"
 )
 
 type Entry struct {
@@ -30,6 +30,10 @@ type Client interface {
 	Remove(ctx context.Context, path string) error
 	Rename(ctx context.Context, src, dst string) error
 	Mkdir(ctx context.Context, path string) error
+	// Benchmark transfers sizeBytes of synthetic data to a temp file in /tmp
+	// (fully in-memory on the local side, auto-cleaned on the remote side).
+	// Returns (uploadMs, downloadMs).
+	Benchmark(ctx context.Context, sizeBytes int64) (uploadMs, downloadMs int64, err error)
 	Close() error
 }
 

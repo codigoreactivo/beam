@@ -10,8 +10,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/jesusjhoel/beam/internal/config"
-	"github.com/jesusjhoel/beam/internal/project"
+	"github.com/codigoreactivo/beam/internal/config"
+	"github.com/codigoreactivo/beam/internal/project"
 	"github.com/spf13/cobra"
 )
 

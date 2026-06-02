@@ -10,11 +10,11 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/jesusjhoel/beam/internal/config"
-	"github.com/jesusjhoel/beam/internal/project"
-	beamsync "github.com/jesusjhoel/beam/internal/sync"
-	"github.com/jesusjhoel/beam/internal/transfer"
-	"github.com/jesusjhoel/beam/internal/watcher"
+	"github.com/codigoreactivo/beam/internal/config"
+	"github.com/codigoreactivo/beam/internal/project"
+	beamsync "github.com/codigoreactivo/beam/internal/sync"
+	"github.com/codigoreactivo/beam/internal/transfer"
+	"github.com/codigoreactivo/beam/internal/watcher"
 )
 
 const leftPanelWidth = 26

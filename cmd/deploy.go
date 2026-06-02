@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jesusjhoel/beam/internal/hook"
-	beamsync "github.com/jesusjhoel/beam/internal/sync"
+	"github.com/codigoreactivo/beam/internal/hook"
+	beamsync "github.com/codigoreactivo/beam/internal/sync"
 	"github.com/spf13/cobra"
 )
 

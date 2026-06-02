@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	beammcp "github.com/jesusjhoel/beam/mcp"
+	beammcp "github.com/codigoreactivo/beam/mcp"
 	"github.com/spf13/cobra"
 )
 

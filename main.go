@@ -1,6 +1,6 @@
 package main
 
-import "github.com/jesusjhoel/beam/cmd"
+import "github.com/codigoreactivo/beam/cmd"
 
 func main() {
 	cmd.Execute()

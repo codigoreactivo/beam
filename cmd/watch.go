@@ -9,9 +9,9 @@ import (
 	"syscall"
 	"time"
 
-	beamsync "github.com/jesusjhoel/beam/internal/sync"
-	"github.com/jesusjhoel/beam/internal/transfer"
-	"github.com/jesusjhoel/beam/internal/watcher"
+	beamsync "github.com/codigoreactivo/beam/internal/sync"
+	"github.com/codigoreactivo/beam/internal/transfer"
+	"github.com/codigoreactivo/beam/internal/watcher"
 	"github.com/spf13/cobra"
 )
 

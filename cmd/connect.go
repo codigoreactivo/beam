@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/jesusjhoel/beam/internal/config"
-	"github.com/jesusjhoel/beam/internal/transfer"
+	"github.com/codigoreactivo/beam/internal/config"
+	"github.com/codigoreactivo/beam/internal/transfer"
 )
 
 // dial resolves the named project and opens a transfer client.

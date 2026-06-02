@@ -2,14 +2,17 @@ package sync
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/jesusjhoel/beam/internal/config"
-	"github.com/jesusjhoel/beam/internal/transfer"
+	"github.com/codigoreactivo/beam/internal/config"
+	"github.com/codigoreactivo/beam/internal/ignore"
+	"github.com/codigoreactivo/beam/internal/transfer"
 )
 
 type Action string
@@ -49,7 +52,8 @@ func (p *Plan) TotalBytes() int64 {
 // Build walks the local directory and the remote directory, then
 // produces a plan of what needs to be uploaded.
 func Build(ctx context.Context, client transfer.Client, p *config.Project) (*Plan, error) {
-	localMap, err := walkLocal(p.Local)
+	rules := ignore.Load(p.Local)
+	localMap, err := walkLocal(p.Local, rules)
 	if err != nil {
 		return nil, err
 	}
@@ -89,47 +93,102 @@ func Build(ctx context.Context, client transfer.Client, p *config.Project) (*Pla
 	return plan, nil
 }
 
-// Execute uploads every non-skipped entry in the plan.
-// onFile is called before each upload (can be nil).
+const maxRetries = 3
+
+// Execute uploads every non-skipped entry in the plan using a worker pool.
+// onFile is called before each upload attempt (can be nil).
 func Execute(ctx context.Context, client transfer.Client, plan *Plan, p *config.Project, onFile func(PlanEntry)) error {
+	workers := p.Workers
+	if workers <= 0 {
+		workers = 4
+	}
+	// FTP/FTPS share a single control connection — must be serial
+	if p.Protocol == config.ProtocolFTP || p.Protocol == config.ProtocolFTPS {
+		workers = 1
+	}
+
+	type result struct {
+		relPath string
+		err     error
+	}
+
+	sem := make(chan struct{}, workers)
+	errc := make(chan result, len(plan.Entries))
+	var wg sync.WaitGroup
+
 	for _, entry := range plan.Entries {
 		if entry.Action == ActionSkip {
 			continue
 		}
 		if ctx.Err() != nil {
-			return ctx.Err()
+			break
 		}
-		if onFile != nil {
-			onFile(entry)
-		}
-		local := filepath.Join(p.Local, filepath.FromSlash(entry.RelPath))
-		remote := path.Join(p.Remote, entry.RelPath)
-		if _, err := client.Upload(ctx, local, remote); err != nil {
-			return err
+		entry := entry
+		sem <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if onFile != nil {
+				onFile(entry)
+			}
+			local := filepath.Join(p.Local, filepath.FromSlash(entry.RelPath))
+			remote := path.Join(p.Remote, entry.RelPath)
+			err := uploadWithRetry(ctx, client, local, remote, maxRetries)
+			errc <- result{relPath: entry.RelPath, err: err}
+		}()
+	}
+
+	wg.Wait()
+	close(errc)
+
+	for r := range errc {
+		if r.err != nil {
+			return fmt.Errorf("upload %s: %w", r.relPath, r.err)
 		}
 	}
-	return nil
+	return ctx.Err()
+}
+
+// uploadWithRetry retries on transient errors with exponential backoff.
+func uploadWithRetry(ctx context.Context, client transfer.Client, local, remote string, attempts int) error {
+	var err error
+	for i := range attempts {
+		if i > 0 {
+			delay := time.Duration(i*i) * 500 * time.Millisecond
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+		if _, err = client.Upload(ctx, local, remote); err == nil {
+			return nil
+		}
+	}
+	return err
 }
 
 // ── internals ────────────────────────────────────────────────────────────────
 
-func walkLocal(root string) (map[string]os.FileInfo, error) {
+func walkLocal(root string, rules *ignore.Rules) (map[string]os.FileInfo, error) {
 	files := map[string]os.FileInfo{}
 	err := filepath.Walk(root, func(localPath string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
+		rel, _ := filepath.Rel(root, localPath)
+		relSlash := filepath.ToSlash(rel)
 		if info.IsDir() {
-			if shouldIgnoreDir(info.Name()) {
+			if shouldIgnoreDir(info.Name()) || rules.Match(relSlash, true) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if shouldIgnoreFile(info.Name()) {
+		if shouldIgnoreFile(info.Name()) || rules.Match(relSlash, false) {
 			return nil
 		}
-		rel, _ := filepath.Rel(root, localPath)
-		files[filepath.ToSlash(rel)] = info
+		files[relSlash] = info
 		return nil
 	})
 	return files, err

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jesusjhoel/beam/internal/config"
+	"github.com/codigoreactivo/beam/internal/config"
 	"github.com/spf13/cobra"
 )
 

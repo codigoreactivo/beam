@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/jesusjhoel/beam/internal/config"
+	"github.com/codigoreactivo/beam/internal/config"
+	"github.com/codigoreactivo/beam/internal/ignore"
 )
 
 const debounceDelay = 500 * time.Millisecond
@@ -22,6 +23,7 @@ type ChangeEvent struct {
 
 type Watcher struct {
 	project *config.Project
+	rules   *ignore.Rules
 	fsw     *fsnotify.Watcher
 	Events  chan ChangeEvent
 	mu      sync.Mutex
@@ -35,6 +37,7 @@ func New(p *config.Project) (*Watcher, error) {
 	}
 	return &Watcher{
 		project: p,
+		rules:   ignore.Load(p.Local),
 		fsw:     fsw,
 		Events:  make(chan ChangeEvent, 64),
 		timers:  map[string]*time.Timer{},
@@ -45,15 +48,17 @@ func New(p *config.Project) (*Watcher, error) {
 // and begins the event loop in a goroutine. Returns an error if the local
 // directory cannot be traversed.
 func (w *Watcher) Start(ctx context.Context) error {
-	err := filepath.WalkDir(w.project.Local, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(w.project.Local, func(absPath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
-			if shouldIgnoreDir(d.Name()) {
+			rel, _ := filepath.Rel(w.project.Local, absPath)
+			relSlash := filepath.ToSlash(rel)
+			if shouldIgnoreDir(d.Name()) || w.rules.Match(relSlash, true) {
 				return filepath.SkipDir
 			}
-			return w.fsw.Add(path)
+			return w.fsw.Add(absPath)
 		}
 		return nil
 	})
@@ -78,7 +83,9 @@ func (w *Watcher) loop(ctx context.Context) {
 				return
 			}
 			if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) {
-				if !shouldIgnorePath(event.Name) {
+				rel, _ := filepath.Rel(w.project.Local, event.Name)
+				relSlash := filepath.ToSlash(rel)
+				if !shouldIgnorePath(event.Name) && !w.rules.Match(relSlash, false) {
 					w.debounce(event.Name)
 				}
 			}

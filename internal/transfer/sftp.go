@@ -2,6 +2,7 @@ package transfer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -11,9 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jesusjhoel/beam/internal/config"
+	"github.com/codigoreactivo/beam/internal/config"
 	"github.com/pkg/sftp"
 	gossh "golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 type sftpClient struct {
@@ -27,10 +29,15 @@ func dialSFTP(p *config.Project) (*sftpClient, error) {
 		return nil, fmt.Errorf("auth: %w", err)
 	}
 
+	hkcb, err := hostKeyCallback()
+	if err != nil {
+		return nil, fmt.Errorf("known_hosts: %w", err)
+	}
+
 	sshCfg := &gossh.ClientConfig{
 		User:            p.User,
 		Auth:            auth,
-		HostKeyCallback: gossh.InsecureIgnoreHostKey(), // TODO: use known_hosts
+		HostKeyCallback: hkcb,
 		Timeout:         15 * time.Second,
 	}
 
@@ -40,7 +47,11 @@ func dialSFTP(p *config.Project) (*sftpClient, error) {
 		return nil, fmt.Errorf("ssh dial %s: %w", addr, err)
 	}
 
-	sftpConn, err := sftp.NewClient(sshConn)
+	sftpConn, err := sftp.NewClient(sshConn,
+		sftp.UseConcurrentWrites(true),
+		sftp.UseConcurrentReads(true),
+		sftp.MaxPacket(1<<15), // 32 KB packets (default ~34 KB but forces full pipeline)
+	)
 	if err != nil {
 		sshConn.Close()
 		return nil, fmt.Errorf("sftp session: %w", err)
@@ -63,7 +74,18 @@ func authMethods(p *config.Project) ([]gossh.AuthMethod, error) {
 		return []gossh.AuthMethod{gossh.PublicKeys(signer)}, nil
 	}
 	if p.Password != "" {
-		return []gossh.AuthMethod{gossh.Password(expandEnv(p.Password))}, nil
+		pass := p.Password // never expand env vars on passwords — $ is valid in passwords
+		// Try both password and keyboard-interactive (required by many cPanel/WHM servers).
+		return []gossh.AuthMethod{
+			gossh.Password(pass),
+			gossh.KeyboardInteractive(func(_, _ string, questions []string, _ []bool) ([]string, error) {
+				answers := make([]string, len(questions))
+				for i := range questions {
+					answers[i] = pass
+				}
+				return answers, nil
+			}),
+		}, nil
 	}
 	return nil, fmt.Errorf("no credentials: set 'key' or 'password' in project config")
 }
@@ -233,4 +255,100 @@ func (c *sftpClient) Download(_ context.Context, remote, local string) (int64, e
 		return n, fmt.Errorf("copy %s → %s: %w", remote, local, err)
 	}
 	return n, nil
+}
+
+func (c *sftpClient) Benchmark(_ context.Context, sizeBytes int64) (int64, int64, error) {
+	remotePath := fmt.Sprintf("/tmp/.beam_bm_%d", time.Now().UnixNano())
+
+	payload := syntheticPayload(sizeBytes)
+
+	// Upload: write from memory directly to remote.
+	uploadStart := time.Now()
+	dst, err := c.sftp.Create(remotePath)
+	if err != nil {
+		return 0, 0, fmt.Errorf("benchmark create: %w", err)
+	}
+	if _, err := dst.Write(payload); err != nil {
+		dst.Close()
+		c.sftp.Remove(remotePath) //nolint
+		return 0, 0, fmt.Errorf("benchmark write: %w", err)
+	}
+	dst.Close()
+	uploadMs := time.Since(uploadStart).Milliseconds()
+
+	// Download: read remote into /dev/null (io.Discard).
+	downloadStart := time.Now()
+	src, err := c.sftp.Open(remotePath)
+	if err != nil {
+		c.sftp.Remove(remotePath) //nolint
+		return uploadMs, 0, fmt.Errorf("benchmark open: %w", err)
+	}
+	_, dlErr := io.Copy(io.Discard, src)
+	src.Close()
+	downloadMs := time.Since(downloadStart).Milliseconds()
+
+	c.sftp.Remove(remotePath) //nolint — best-effort cleanup
+
+	if dlErr != nil {
+		return uploadMs, 0, fmt.Errorf("benchmark read: %w", dlErr)
+	}
+	return uploadMs, downloadMs, nil
+}
+
+// syntheticPayload returns a repeating byte pattern of the requested size.
+func syntheticPayload(size int64) []byte {
+	data := make([]byte, size)
+	for i := range data {
+		data[i] = byte(i & 0xff)
+	}
+	return data
+}
+
+// hostKeyCallback implements Trust-On-First-Use (TOFU) against
+// ~/.beam/known_hosts. Unknown hosts are added automatically on first
+// connection; a key mismatch (potential MITM) returns a hard error.
+func hostKeyCallback() (gossh.HostKeyCallback, error) {
+	khPath := config.KnownHostsPath()
+
+	if _, err := os.Stat(khPath); os.IsNotExist(err) {
+		if err := os.MkdirAll(filepath.Dir(khPath), 0o700); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(khPath, nil, 0o600); err != nil {
+			return nil, err
+		}
+	}
+
+	verify, err := knownhosts.New(khPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return func(hostname string, remote net.Addr, key gossh.PublicKey) error {
+		// If the server presents an SSH certificate, verify using its underlying
+		// public key — this handles hosts that haven't pinned a CA in known_hosts.
+		checkKey := key
+		if cert, ok := key.(*gossh.Certificate); ok {
+			checkKey = cert.Key
+		}
+
+		err := verify(hostname, remote, checkKey)
+		if err == nil {
+			return nil
+		}
+		var keyErr *knownhosts.KeyError
+		if errors.As(err, &keyErr) && len(keyErr.Want) == 0 {
+			// Host seen for the first time — record and trust (TOFU).
+			f, openErr := os.OpenFile(khPath, os.O_APPEND|os.O_WRONLY, 0o600)
+			if openErr != nil {
+				return openErr
+			}
+			defer f.Close()
+			line := knownhosts.Line([]string{knownhosts.Normalize(hostname)}, checkKey)
+			_, writeErr := fmt.Fprintln(f, line)
+			return writeErr
+		}
+		// Key mismatch — potential MITM, refuse connection.
+		return fmt.Errorf("host key mismatch for %s: %w (edit %s to fix)", hostname, err, khPath)
+	}, nil
 }

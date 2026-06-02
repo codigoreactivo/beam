@@ -27,6 +27,10 @@ func KeysDir() string {
 	return filepath.Join(BeamDir(), "keys")
 }
 
+func KnownHostsPath() string {
+	return filepath.Join(BeamDir(), "known_hosts")
+}
+
 func defaults() *GlobalConfig {
 	return &GlobalConfig{
 		DefaultProtocol: "sftp",

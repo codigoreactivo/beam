@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	beamsync "github.com/jesusjhoel/beam/internal/sync"
+	beamsync "github.com/codigoreactivo/beam/internal/sync"
 	"github.com/spf13/cobra"
 )
 

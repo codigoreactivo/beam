@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/jesusjhoel/beam/tui"
+	"github.com/codigoreactivo/beam/tui"
 	"github.com/spf13/cobra"
 )
 

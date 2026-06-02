@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jesusjhoel/beam/internal/config"
+	"github.com/codigoreactivo/beam/internal/config"
 )
 
 type Level int

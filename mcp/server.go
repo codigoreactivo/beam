@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jesusjhoel/beam/internal/config"
-	"github.com/jesusjhoel/beam/internal/hook"
-	"github.com/jesusjhoel/beam/internal/project"
-	beamsync "github.com/jesusjhoel/beam/internal/sync"
-	"github.com/jesusjhoel/beam/internal/transfer"
+	"github.com/codigoreactivo/beam/internal/config"
+	"github.com/codigoreactivo/beam/internal/hook"
+	"github.com/codigoreactivo/beam/internal/project"
+	beamsync "github.com/codigoreactivo/beam/internal/sync"
+	"github.com/codigoreactivo/beam/internal/transfer"
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )

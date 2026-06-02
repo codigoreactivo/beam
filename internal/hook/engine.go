@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jesusjhoel/beam/internal/config"
+	"github.com/codigoreactivo/beam/internal/config"
 )
 
 type Event string

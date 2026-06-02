@@ -1,6 +1,7 @@
 package transfer
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -12,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jesusjhoel/beam/internal/config"
+	"github.com/codigoreactivo/beam/internal/config"
 	goftp "github.com/jlaffaye/ftp"
 )
 
@@ -40,7 +41,7 @@ func dialFTP(p *config.Project) (*ftpClient, error) {
 		return nil, fmt.Errorf("ftp dial %s: %w", addr, err)
 	}
 
-	password := expandEnv(p.Password)
+	password := p.Password // never expand env vars — $ is valid in passwords
 	if err := conn.Login(p.User, password); err != nil {
 		conn.Quit()
 		return nil, fmt.Errorf("ftp login %s@%s: %w", p.User, addr, err)
@@ -216,6 +217,37 @@ func (c *ftpClient) Download(_ context.Context, remote, local string) (int64, er
 		return n, fmt.Errorf("copy %s → %s: %w", remote, local, err)
 	}
 	return n, nil
+}
+
+func (c *ftpClient) Benchmark(_ context.Context, sizeBytes int64) (int64, int64, error) {
+	remotePath := fmt.Sprintf("/tmp/.beam_bm_%d", time.Now().UnixNano())
+
+	payload := syntheticPayload(sizeBytes)
+
+	// Upload from memory.
+	uploadStart := time.Now()
+	if err := c.conn.Stor(remotePath, bytes.NewReader(payload)); err != nil {
+		return 0, 0, fmt.Errorf("benchmark stor: %w", err)
+	}
+	uploadMs := time.Since(uploadStart).Milliseconds()
+
+	// Download to discard.
+	downloadStart := time.Now()
+	resp, err := c.conn.Retr(remotePath)
+	if err != nil {
+		c.conn.Delete(remotePath) //nolint
+		return uploadMs, 0, fmt.Errorf("benchmark retr: %w", err)
+	}
+	_, dlErr := io.Copy(io.Discard, resp)
+	resp.Close()
+	downloadMs := time.Since(downloadStart).Milliseconds()
+
+	c.conn.Delete(remotePath) //nolint — best-effort cleanup
+
+	if dlErr != nil {
+		return uploadMs, 0, fmt.Errorf("benchmark read: %w", dlErr)
+	}
+	return uploadMs, downloadMs, nil
 }
 
 // countReader wraps a reader and counts bytes read.
