@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
+	beamsync "github.com/jesusjhoel/beam/internal/sync"
 	"github.com/spf13/cobra"
 )
 
@@ -10,16 +12,53 @@ var syncDryRun bool
 
 var syncCmd = &cobra.Command{
 	Use:   "sync",
-	Short: "Sync local directory → remote (incremental)",
+	Short: "Sync local directory → remote (incremental, skips unchanged files)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if flagProject == "" {
-			return fmt.Errorf("--project / -p is required")
+		p, client, err := dial(flagProject)
+		if err != nil {
+			return err
 		}
-		if syncDryRun {
-			fmt.Fprintf(cmd.OutOrStdout(), "dry-run sync for %q — not yet implemented\n", flagProject)
+		defer client.Close()
+
+		ctx := context.Background()
+		if !flagQuiet {
+			fmt.Fprintf(cmd.OutOrStdout(), "Building sync plan for %q ...\n", p.Name)
+		}
+
+		plan, err := beamsync.Build(ctx, client, p)
+		if err != nil {
+			return fmt.Errorf("build plan: %w", err)
+		}
+
+		if plan.AddCount+plan.UpdateCount == 0 {
+			fmt.Fprintln(cmd.OutOrStdout(), "✓ Already in sync — nothing to upload")
 			return nil
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "syncing project %q — not yet implemented\n", flagProject)
+
+		if syncDryRun {
+			return printPlan(cmd.OutOrStdout(), plan)
+		}
+
+		if !flagQuiet {
+			printPlan(cmd.OutOrStdout(), plan) //nolint:errcheck
+			fmt.Fprintln(cmd.OutOrStdout())
+		}
+
+		err = beamsync.Execute(ctx, client, plan, p, func(e beamsync.PlanEntry) {
+			if !flagQuiet {
+				verb := "+"
+				if e.Action == beamsync.ActionUpdate {
+					verb = "↑"
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "  %s %s (%s)\n", verb, e.RelPath, formatBytes(e.LocalSize))
+			}
+		})
+		if err != nil {
+			return err
+		}
+
+		fmt.Fprintf(cmd.OutOrStdout(), "✓ %d added, %d updated, %d skipped (%s total)\n",
+			plan.AddCount, plan.UpdateCount, plan.SkipCount, formatBytes(plan.TotalBytes()))
 		return nil
 	},
 }

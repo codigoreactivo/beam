@@ -85,6 +85,34 @@ func (c *sftpClient) Close() error {
 	return c.ssh.Close()
 }
 
+func (c *sftpClient) Walk(_ context.Context, remotePath string) ([]WalkEntry, error) {
+	var entries []WalkEntry
+	walker := c.sftp.Walk(remotePath)
+	for walker.Step() {
+		if walker.Err() != nil {
+			continue // skip unreadable entries rather than aborting
+		}
+		fi := walker.Stat()
+		full := walker.Path()
+		rel := strings.TrimPrefix(full, remotePath)
+		rel = strings.TrimPrefix(rel, "/")
+		if rel == "" {
+			continue
+		}
+		entries = append(entries, WalkEntry{
+			RelPath: rel,
+			Entry: Entry{
+				Name:    fi.Name(),
+				Size:    fi.Size(),
+				IsDir:   fi.IsDir(),
+				Mode:    fi.Mode(),
+				ModTime: fi.ModTime(),
+			},
+		})
+	}
+	return entries, nil
+}
+
 func (c *sftpClient) List(_ context.Context, remotePath string) ([]Entry, error) {
 	infos, err := c.sftp.ReadDir(remotePath)
 	if err != nil {
