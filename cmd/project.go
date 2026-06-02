@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -200,45 +201,26 @@ var projectShowCmd = &cobra.Command{
 
 var projectTestCmd = &cobra.Command{
 	Use:   "test <name>",
-	Short: "Validate project config (connection test coming soon)",
+	Short: "Test connection to a project",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		mgr, err := loadManager()
+		_, client, err := dial(args[0])
 		if err != nil {
 			return err
 		}
-		p, err := mgr.Get(args[0])
-		if err != nil {
-			return err
+		defer client.Close()
+
+		// quick smoke-test: list the remote root
+		mgr, _ := loadManager()
+		p, _ := mgr.Get(args[0])
+		_, listErr := client.List(context.Background(), p.Remote)
+
+		if listErr != nil {
+			return fmt.Errorf("connected but could not list %s: %w", p.Remote, listErr)
 		}
 
-		var issues []string
-		if p.Host == "" {
-			issues = append(issues, "host is empty")
-		}
-		if p.User == "" {
-			issues = append(issues, "user is empty")
-		}
-		if p.Local == "" {
-			issues = append(issues, "local directory is empty")
-		}
-		if p.Remote == "" {
-			issues = append(issues, "remote directory is empty")
-		}
-		if p.Protocol == config.ProtocolSFTP && p.Key == "" && p.Password == "" {
-			issues = append(issues, "sftp requires key or password")
-		}
-
-		if len(issues) > 0 {
-			for _, iss := range issues {
-				fmt.Fprintf(cmd.OutOrStdout(), "✗ %s\n", iss)
-			}
-			return fmt.Errorf("project %q has configuration errors", args[0])
-		}
-
-		fmt.Fprintf(cmd.OutOrStdout(), "✓ Config for %q looks valid (%s %s@%s:%d)\n",
+		fmt.Fprintf(cmd.OutOrStdout(), "✓ Connected to %q (%s %s@%s:%d)\n",
 			p.Name, p.Protocol, p.User, p.Host, p.Port)
-		fmt.Fprintln(cmd.OutOrStdout(), "  Connection test will be available once the transfer engine is implemented.")
 		return nil
 	},
 }
